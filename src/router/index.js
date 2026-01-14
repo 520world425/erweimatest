@@ -2,6 +2,8 @@ import { createRouter, createWebHistory } from 'vue-router'
 import Login from '../components/Login.vue'
 import Patrol from '../components/Patrol.vue'
 import InspectionForm from '../components/InspectionForm.vue'
+import Patrol1 from '../components/Patrol1.vue'
+import InspectionForm1 from '../components/InspectionForm1.vue'
 
 const routes = [
     {
@@ -29,6 +31,18 @@ const routes = [
         path: '/inspection-form/:area',
         name: 'InspectionForm',
         component: InspectionForm,
+        props: true
+    },
+    {
+        path: '/patrol1/:area',
+        name: 'Patrol1',
+        component: Patrol1,
+        props: true
+    },
+    {
+        path: '/inspection-form1/:area',
+        name: 'InspectionForm1',
+        component: InspectionForm1,
         props: true
     },
     // 添加404处理
