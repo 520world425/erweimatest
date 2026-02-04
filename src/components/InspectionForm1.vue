@@ -19,17 +19,41 @@
         <p class="field-desc">根据当前区域自动获取</p>
       </div>
 
-      <!-- 报修区域（自动获取） -->
+      <!-- 报修区域（动态显示） -->
       <div class="form-item">
         <p>报修区域 <span class="required">*</span></p>
-        <input
-            type="text"
-            v-model="formData.areaName"
-            class="form-input disabled-input"
-            disabled
-            placeholder="自动获取报修区域"
-        />
-        <p class="field-desc">当前报修区域</p>
+
+        <!-- 当项目名称和区域名称相同时，显示下拉选择框 -->
+        <template v-if="showAreaSelect">
+          <select
+              v-model="selectedAreaKey"
+              class="form-input"
+              :class="{ 'error-border': errors.areaName }"
+              @change="onAreaSelectChange"
+          >
+            <option value="" disabled>请选择报修区域</option>
+            <option v-for="area in availableAreas"
+                    :key="area.areaKey"
+                    :value="area.areaKey">
+              {{ area.areaName }}
+            </option>
+          </select>
+          <p class="field-desc">当前报修单位下有多个区域，请选择具体区域</p>
+        </template>
+
+        <!-- 否则显示普通输入框 -->
+        <template v-else>
+          <input
+              type="text"
+              v-model="formData.areaName"
+              class="form-input disabled-input"
+              disabled
+              placeholder="自动获取报修区域"
+          />
+          <p class="field-desc">当前报修区域</p>
+        </template>
+
+        <p class="error-text" v-if="errors.areaName">{{ errors.areaName }}</p>
       </div>
 
       <!-- 报修人姓名 -->
@@ -68,7 +92,7 @@
             class="form-textarea"
             :class="{ 'error-border': errors.description }"
             placeholder="请详细描述报修问题"
-            rows="4"
+            rows="6"
             @input="clearError('description')"
         ></textarea>
         <p class="error-text" v-if="errors.description">{{ errors.description }}</p>
@@ -187,12 +211,18 @@ const formData = ref({
   appKey: ''
 })
 
+// 新增状态
+const showAreaSelect = ref(false)
+const selectedAreaKey = ref('')
+const availableAreas = ref([])
+
 // 错误信息
 const errors = ref({
   reporterName: '',
   reporterPhone: '',
   description: '',
-  images: ''
+  images: '',
+  areaName: ''
 })
 
 // 图片文件
@@ -229,6 +259,9 @@ const initializeForm = async () => {
         if (projectResponse) {
           formData.value.projectName = projectResponse.project || '未知项目'
           formData.value.projectId = projectId
+
+          // 获取当前项目下的所有区域
+          await loadProjectAreas(projectId, areaKey)
         }
       }
 
@@ -242,6 +275,58 @@ const initializeForm = async () => {
   } finally {
     isLoading.value = false
   }
+}
+
+/**
+ * 加载项目下的所有区域
+ */
+const loadProjectAreas = async (projectId, currentAreaKey) => {
+  try {
+    // 获取项目下的所有报修区域
+    const areasResponse = await request.get(`/repair-areas/project/${projectId}`)
+
+    if (areasResponse && Array.isArray(areasResponse)) {
+      // 检查项目名称和区域名称是否相同
+      const currentArea = areasResponse.find(area => area.areaKey === currentAreaKey)
+      if (currentArea && formData.value.projectName === currentArea.areaName) {
+        // 名称相同，显示下拉选择框
+        showAreaSelect.value = true
+
+        // 获取除了当前区域外的其他区域
+        availableAreas.value = areasResponse
+            .filter(area => area.areaKey !== currentAreaKey)
+            .map(area => ({
+              areaKey: area.areaKey,
+              areaName: area.areaName
+            }))
+
+        // 如果没有其他区域，则不显示下拉框
+        if (availableAreas.value.length === 0) {
+          showAreaSelect.value = false
+        } else {
+          // 默认选择第一个区域
+          selectedAreaKey.value = availableAreas.value[0].areaKey
+          formData.value.appKey = availableAreas.value[0].areaKey
+          formData.value.areaName = availableAreas.value[0].areaName
+        }
+      }
+    }
+  } catch (error) {
+    console.error('加载项目区域失败:', error)
+    showAreaSelect.value = false
+  }
+}
+
+/**
+ * 区域选择变化事件
+ */
+const onAreaSelectChange = () => {
+  const selectedArea = availableAreas.value.find(area => area.areaKey === selectedAreaKey.value)
+  if (selectedArea) {
+    formData.value.appKey = selectedArea.areaKey
+    formData.value.areaName = selectedArea.areaName
+  }
+  clearError('areaName')
 }
 
 /**
@@ -423,7 +508,8 @@ const validateForm = () => {
     reporterName: '',
     reporterPhone: '',
     description: '',
-    images: ''
+    images: '',
+    areaName: ''
   }
 
   if (!formData.value.reporterName?.trim()) {
@@ -450,6 +536,12 @@ const validateForm = () => {
 
   if (imageFiles.value.length === 0) {
     newErrors.images = '请至少上传一张报修图片'
+    isValid = false
+  }
+
+  // 新增：验证区域选择（当显示下拉框时）
+  if (showAreaSelect.value && !selectedAreaKey.value) {
+    newErrors.areaName = '请选择报修区域'
     isValid = false
   }
 
@@ -486,18 +578,19 @@ const submitRepairForm = async () => {
   uploadProgress.value = 0
 
   try {
-    // 创建 RepairData 对象，status改为0
+    // 创建 RepairData 对象，status改为2
     const repairData = {
       name: formData.value.reporterName.trim(),
       phone: formData.value.reporterPhone.trim(),
       content: formData.value.description.trim(),
       datetime: formatLocalDateTime(),
-      appKey: formData.value.appKey,
+      appKey: formData.value.appKey, // 使用选择的appKey
       projectId: formData.value.projectId,
-      status: '0' // 修改为0
+      status: '2' // 修改为2
     }
 
     console.log('创建 RepairData 对象:', repairData)
+    console.log('报修区域:', formData.value.areaName, 'appKey:', formData.value.appKey)
     console.log('准备上传的图片数量:', imageFiles.value.length)
     console.log('压缩前总大小:', formatFileSize(imageFiles.value.reduce((sum, file) => sum + (file.originalSize || file.size), 0)))
     console.log('压缩后总大小:', formatFileSize(totalFileSize.value))
@@ -530,7 +623,7 @@ const submitRepairForm = async () => {
       headers: {
         'Content-Type': 'multipart/form-data'
       },
-      timeout: 120000, // 增加超时时间到120秒
+      timeout: 10000,
       // 上传进度回调
       onUploadProgress: (progressEvent) => {
         if (progressEvent.total) {
@@ -557,6 +650,7 @@ const submitRepairForm = async () => {
     imageFiles.value = []
     formData.value.images = []
     uploadProgress.value = 0
+    selectedAreaKey.value = ''
 
   } catch (error) {
     console.error('提交报修失败:', error)
@@ -672,7 +766,12 @@ h1 {
   margin-left: 4px;
 }
 
-.form-input, .form-textarea {
+/* 下拉框样式 */
+.form-input[type="text"],
+.form-input[type="tel"],
+.form-input[type="date"],
+.form-input[type="time"],
+select.form-input {
   width: 100%;
   padding: 12px 16px;
   border: 2px solid #e8e8e8;
@@ -680,9 +779,21 @@ h1 {
   font-size: 16px;
   transition: all 0.3s ease;
   box-sizing: border-box;
+  background-color: white;
 }
 
-.form-input:focus, .form-textarea:focus {
+select.form-input {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23333' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14L2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 16px center;
+  background-size: 16px;
+  padding-right: 40px;
+}
+
+.form-input:focus,
+.form-textarea:focus,
+select.form-input:focus {
   outline: none;
   border-color: #3b82f6;
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
@@ -716,10 +827,26 @@ h1 {
   font-size: 14px;
 }
 
+/* 修改textarea样式，增加高度 */
 .form-textarea {
+  width: 100%;
+  padding: 16px;
+  border: 2px solid #e8e8e8;
+  border-radius: 8px;
+  font-size: 16px;
+  transition: all 0.3s ease;
+  box-sizing: border-box;
+  background-color: white;
   resize: vertical;
-  min-height: 100px;
+  min-height: 150px; /* 从100px增加到150px */
   line-height: 1.5;
+  font-family: inherit;
+}
+
+.form-textarea:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
 /* 图片上传样式 */
@@ -1032,6 +1159,15 @@ h1 {
   .form-item {
     padding: 15px;
     margin-bottom: 20px;
+  }
+
+  select.form-input {
+    background-position: right 12px center;
+    padding-right: 36px;
+  }
+
+  .form-textarea {
+    min-height: 120px; /* 移动端稍小一点 */
   }
 
   .image-preview {
